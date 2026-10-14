@@ -21,6 +21,9 @@ readonly ICON_DIR="/opt/pt/art"
 readonly ICON_FILE="${ICON_DIR}/app.png"
 readonly DESKTOP_FILE="/usr/share/applications/packettracer.desktop"
 readonly DESKTOP_TMP="/tmp/packettracer.desktop.$$"
+readonly PACKETTRACER_APP="/opt/pt/packettracer.AppImage"
+readonly EULA_STATE_DIR=".local/.packettracer"
+readonly ACTIVE_VERSION_CONTENT=":b3ff134c88b008deda94147e4c7ac664:${PACKETTRACER_APP}"
 
 readonly JAMMY_FILE="/etc/apt/sources.list.d/packettracer-jammy-temp.list"
 readonly JAMMY_TMP="/tmp/packettracer-jammy-$$.list"
@@ -123,7 +126,7 @@ trap cleanup EXIT
 # ==================================================
 
 check_requirements() {
-    log_step "1/7 - Comprobando requisitos"
+    log_step "1/8 - Comprobando requisitos"
 
     [[ "$EUID" -ne 0 ]] ||
         die "Ejecuta el script con tu usuario habitual, no como root."
@@ -168,7 +171,7 @@ prepare_system() {
 # Activar repositorios de Ubuntu
 # ==================================================
 enable_jammy_repositories() {
-    log_step "2/7 - Activando temporalmente los repositorios Ubuntu Jammy"
+    log_step "2/8 - Activando temporalmente los repositorios Ubuntu Jammy"
 
     # No sobrescribir configuraciones preexistentes.
     if sudo test -e "$JAMMY_FILE"; then
@@ -206,7 +209,7 @@ EOF
 # ==================================================
 
 download_package() {
-    log_step "3/7 - Descargando Packet Tracer ${VERSION}"
+    log_step "3/8 - Descargando Packet Tracer ${VERSION}"
 
     local temp_file="${DEB_FILE}.part"
 
@@ -244,7 +247,7 @@ download_package() {
 # ==================================================
 
 install_package() {
-    log_step "4/7 - Instalando Packet Tracer"
+    log_step "4/8 - Instalando Packet Tracer"
 
     log_info "Instalando el paquete DEB..."
 
@@ -271,11 +274,70 @@ install_package() {
 }
 
 # ==================================================
+# Preparación de la EULA para usuarios existentes y futuros
+# ==================================================
+
+provision_eula_state() {
+    log_step "5/8 - Preparando la EULA para todos los usuarios"
+
+    local temp_dir active_version_file eula_file
+    local uid_min username uid gid home shell user_state_dir
+    local configured=0
+
+    # Comprobar que el ejecutable existe antes de crear el estado de aceptación.
+    sudo test -x "$PACKETTRACER_APP" ||
+        die "No se encuentra el ejecutable esperado: $PACKETTRACER_APP"
+
+    temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/packettracer-eula.XXXXXX")"
+    active_version_file="${temp_dir}/active-version"
+    eula_file="${temp_dir}/eula-"
+
+    printf '%s\\n' "$ACTIVE_VERSION_CONTENT" > "$active_version_file"
+    cat > "$eula_file" <<'EULA'
+Cisco Packet Tracer Software License Agreement
+
+DOWNLOADING, INSTALLING, OR USING THE CISCO PACKET TRACER SOFTWARE CONSTITUTES ACCEPTANCE OF THE CISCO END USER LICENSE AGREEMENT ("EULA" https://www.cisco.com/c/en/us/about/legal/cloud-and-software/end_user_license_agreement.html) AND THE SUPPLEMENTAL END USER LICENSE AGREEMENT FOR CISCO PACKET TRACER ("SEULA" https://www.cisco.com/c/dam/en_us/about/doing_business/legal/seula/cisco-packet-tracer-software.pdf). IF YOU DO NOT AGREE TO ALL OF THE TERMS OF THE EULA AND SEULA, THEN CISCO SYSTEMS, INC. ("CISCO") IS UNWILLING TO LICENSE THE SOFTWARE TO YOU AND YOU ARE NOT AUTHORIZED TO DOWNLOAD, INSTALL OR USE THE SOFTWARE.
+EULA
+
+    # Instalar en /etc/skel para cuentas nuevas.
+    sudo install -d -o root -g root -m 755 "/etc/skel/${EULA_STATE_DIR}"
+    sudo install -o root -g root -m 644 "$active_version_file" \
+        "/etc/skel/${EULA_STATE_DIR}/active-version"
+    sudo install -o root -g root -m 644 "$eula_file" \
+        "/etc/skel/${EULA_STATE_DIR}/eula-"
+
+    # Obtener UID_MIN de login.defs; usar 1000 si no está definido.
+    uid_min="$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null || true)"
+    [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
+
+    # Preparar cada cuenta normal existente que tenga un directorio home real.
+    while IFS=: read -r username _ uid gid _ home shell; do
+        [[ "$uid" =~ ^[0-9]+$ ]] || continue
+        (( uid >= uid_min )) || continue
+        [[ -n "$home" && -d "$home" ]] || continue
+
+        user_state_dir="${home}/${EULA_STATE_DIR}"
+        sudo install -d -o "$uid" -g "$gid" -m 755 "$user_state_dir"
+        sudo install -o "$uid" -g "$gid" -m 644 "$active_version_file" \
+            "${user_state_dir}/active-version"
+        sudo install -o "$uid" -g "$gid" -m 644 "$eula_file" \
+            "${user_state_dir}/eula-"
+
+        log_info "Estado de la EULA preparado para ${username}."
+        ((configured += 1))
+    done < <(getent passwd)
+
+    rm -rf "$temp_dir"
+
+    log_success "Estado de la EULA instalado en /etc/skel y preparado para ${configured} usuario(s) existente(s)."
+}
+
+# ==================================================
 # Instalación del icono
 # ==================================================
 
 install_icon() {
-    log_step "5/7 - Instalando el icono"
+    log_step "6/8 - Instalando el icono"
 
     local temp_icon
     temp_icon="$(mktemp "${TMPDIR:-/tmp}/packettracer-icon.XXXXXX")"
@@ -306,7 +368,7 @@ install_icon() {
 # ==================================================
 
 create_shortcut() {
-    log_step "6/7 - Creando acceso directo"
+    log_step "7/8 - Creando acceso directo"
 
     local executable="/usr/local/bin/packettracer"
 
@@ -344,7 +406,7 @@ EOF
 # ==================================================
 
 show_summary() {
-    log_step "7/7 - Verificación final"
+    log_step "8/8 - Verificación final"
 
     printf '\n'
     printf '%b==========================================%b\n' "$GREEN" "$RESET"
@@ -380,6 +442,7 @@ main() {
     prepare_system
     download_package
     install_package
+    provision_eula_state
     install_icon
     create_shortcut
     show_summary
