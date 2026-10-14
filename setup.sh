@@ -1,224 +1,387 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 022
 
-echo "=========================================="
-echo "   INSTALACIÓN CISCO PACKET TRACER 9.0.0"
-echo "=========================================="
+# ==================================================
+# Cisco Packet Tracer 9.0.0 - Instalador
+# ==================================================
 
-# --------------------------------------------------
-# Comprobar sudo
-# --------------------------------------------------
+readonly VERSION="9.0.0"
+readonly APP_NAME="Cisco Packet Tracer"
 
-if ! command -v sudo >/dev/null 2>&1; then
-    echo "ERROR: sudo no está instalado."
-    exit 1
-fi
+readonly DOWNLOAD_URL="https://github.com/andknownmaly/packettracer/releases/download/9.0.0/CiscoPacketTracer_900_Ubuntu_64bit.deb"
+readonly ICON_URL="https://raw.githubusercontent.com/pauchiner/cisco-packet-tracer-script-test/refs/heads/main/pkt.png"
 
-# --------------------------------------------------
-# Actualizar sistema
-# --------------------------------------------------
+readonly DOWNLOAD_DIR="${HOME}/packettracer-install"
+readonly DEB_FILE="${DOWNLOAD_DIR}/CiscoPacketTracer_900_Ubuntu_64bit.deb"
+readonly ICON_DIR="/opt/pt/art"
+readonly ICON_FILE="${ICON_DIR}/app.png"
+readonly DESKTOP_FILE="/usr/share/applications/packettracer.desktop"
+readonly DESKTOP_TMP="/tmp/packettracer.desktop.$$"
 
-echo
-echo "----------------------------------"
-echo "  Actualizando el sistema..."
-echo "----------------------------------"
+readonly JAMMY_FILE="/etc/apt/sources.list.d/packettracer-jammy-temp.list"
+readonly JAMMY_TMP="/tmp/packettracer-jammy-$$.list"
 
-sudo dpkg --configure -a || true
-sudo apt --fix-broken install -y
+JAMMY_ENABLED=0
 
-# --------------------------------------------------
-# Activar repositorios Ubuntu Jammy
-# --------------------------------------------------
+# ==================================================
+# Colores y mensajes
+# ==================================================
 
-echo
-echo "----------------------------------"
-echo "  Activando repositorios Jammy..."
-echo "----------------------------------"
-
-# Copia de seguridad de sources.list
-sudo cp /etc/apt/sources.list /etc/apt/sources.list.backup-packettracer
-
-# Descomentar repositorios deb existentes
-sudo sed -i 's/^# *deb /deb /' /etc/apt/sources.list
-
-sudo apt update
-
-# --------------------------------------------------
-# Descargar Cisco Packet Tracer 9.0
-# --------------------------------------------------
-
-echo
-echo "----------------------------------"
-echo "  Descargando Packet Tracer 9.0..."
-echo "----------------------------------"
-
-DOWNLOAD_URL="https://github.com/andknownmaly/packettracer/releases/download/9.0.0/CiscoPacketTracer_900_Ubuntu_64bit.deb"
-
-DOWNLOAD_DIR="$HOME/packettracer-install"
-
-mkdir -p "$DOWNLOAD_DIR"
-
-DEB_FILE="$DOWNLOAD_DIR/CiscoPacketTracer_900_Ubuntu_64bit.deb"
-
-echo
-echo "URL:"
-echo "$DOWNLOAD_URL"
-echo
-echo "Destino:"
-echo "$DEB_FILE"
-echo
-
-if [ -f "$DEB_FILE" ]; then
-    echo "El archivo ya existe."
-    echo "No es necesario volver a descargarlo."
+if [[ -t 1 ]]; then
+    readonly GREEN='\033[0;32m'
+    readonly YELLOW='\033[0;33m'
+    readonly RED='\033[0;31m'
+    readonly BLUE='\033[0;34m'
+    readonly RESET='\033[0m'
 else
-    wget --show-progress -O "$DEB_FILE" "$DOWNLOAD_URL"
+    readonly GREEN=''
+    readonly YELLOW=''
+    readonly RED=''
+    readonly BLUE=''
+    readonly RESET=''
 fi
 
-# --------------------------------------------------
-# Comprobar descarga
-# --------------------------------------------------
+log_info() {
+    printf '%b[INFO]%b %s\n' "$BLUE" "$RESET" "$*"
+}
 
-if [ ! -s "$DEB_FILE" ]; then
-    echo
-    echo "ERROR: La descarga de Packet Tracer ha fallado."
+log_success() {
+    printf '%b[OK]%b %s\n' "$GREEN" "$RESET" "$*"
+}
+
+log_warning() {
+    printf '%b[AVISO]%b %s\n' "$YELLOW" "$RESET" "$*" >&2
+}
+
+log_error() {
+    printf '%b[ERROR]%b %s\n' "$RED" "$RESET" "$*" >&2
+}
+
+log_step() {
+    printf '\n%b==> %s%b\n' "$BLUE" "$*" "$RESET"
+}
+
+die() {
+    log_error "$*"
     exit 1
-fi
+}
 
-echo
-echo "Descarga completada correctamente."
+cleanup() {
+    local exit_code=$?
 
-# --------------------------------------------------
-# Instalar Packet Tracer
-# --------------------------------------------------
+    # Evitar que la limpieza se invoque recursivamente.
+    trap - EXIT
+    trap '' INT TERM HUP
 
-echo
-echo "----------------------------------"
-echo "  Instalando Packet Tracer..."
-echo "----------------------------------"
+    rm -f "${DESKTOP_TMP:-}"
 
-sudo dpkg -i "$DEB_FILE" || true
+    if (( JAMMY_ENABLED )); then
+        log_info "Desactivando los repositorios temporales de Ubuntu Jammy..."
 
-# Resolver dependencias
-echo
-echo "----------------------------------"
-echo "  Resolviendo dependencias..."
-echo "----------------------------------"
+        if sudo rm -f -- "$JAMMY_FILE"; then
+            JAMMY_ENABLED=0
 
-sudo apt --fix-broken install -y
+            if sudo apt-get update; then
+                log_success "Configuración de APT restaurada."
+            else
+                log_error "No se han podido actualizar los índices tras retirar Jammy."
+                log_warning "Los repositorios temporales se han eliminado, pero revisa APT."
+                (( exit_code == 0 )) && exit_code=1
+            fi
+        else
+            log_error "No se ha podido retirar el fichero temporal de Jammy."
+            log_error "Revisa manualmente: $JAMMY_FILE"
+            (( exit_code == 0 )) && exit_code=1
+        fi
+    fi
 
-# Configurar paquetes pendientes
-sudo dpkg --configure -a
+    exit "$exit_code"
+}
 
-# --------------------------------------------------
-# Descargar icono de Packet Tracer
-# --------------------------------------------------
+on_error() {
+    local exit_code=$?
+    local line="${1:-?}"
+    local command="${2:-desconocido}"
 
-echo
-echo "----------------------------------"
-echo "  Instalando icono de Packet Tracer..."
-echo "----------------------------------"
+    log_error "El proceso ha fallado en la línea ${line}."
+    log_error "Comando: ${command}"
+    log_error "Código de salida: ${exit_code}"
+    log_error "Consulta los mensajes anteriores para identificar la causa."
 
-ICON_URL="https://raw.githubusercontent.com/pauchiner/cisco-packet-tracer-script-test/refs/heads/main/pkt.png"
-ICON_DIR="/opt/pt/art"
-ICON_FILE="$ICON_DIR/app.png"
+    exit "$exit_code"
+}
 
-sudo mkdir -p "$ICON_DIR"
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
+trap cleanup EXIT
 
-if [ -f "$ICON_FILE" ]; then
-    echo "El icono ya existe:"
-    echo "  $ICON_FILE"
-else
-    echo "Descargando icono..."
-    sudo wget --show-progress -O "$ICON_FILE" "$ICON_URL"
-fi
+# ==================================================
+# Comprobaciones iniciales
+# ==================================================
 
-if [ ! -s "$ICON_FILE" ]; then
-    echo
-    echo "ERROR: No se ha podido descargar el icono."
-    exit 1
-fi
+check_requirements() {
+    log_step "1/7 - Comprobando requisitos"
 
-sudo chmod 644 "$ICON_FILE"
+    [[ "$EUID" -ne 0 ]] ||
+        die "Ejecuta el script con tu usuario habitual, no como root."
 
-echo "Icono instalado correctamente:"
-echo "  $ICON_FILE"
+    local required_commands=(
+        sudo
+        apt-get
+        dpkg
+        dpkg-deb
+        curl
+        install
+    )
 
-# --------------------------------------------------
-# Crear acceso directo
-# --------------------------------------------------
+    local cmd
 
-echo
-echo "----------------------------------"
-echo "  Creando acceso directo..."
-echo "----------------------------------"
+    for cmd in "${required_commands[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 ||
+            die "No se encuentra el comando requerido: $cmd"
+    done
 
-sudo tee /usr/share/applications/packettracer.desktop > /dev/null <<'EOF'
+    sudo -v
+
+    mkdir -p "$DOWNLOAD_DIR"
+
+    log_success "Requisitos comprobados."
+}
+
+# ==================================================
+# Preparación del sistema
+# ==================================================
+
+prepare_system() {
+    log_step "Preparando el sistema"
+
+    log_info "Configurando paquetes pendientes..."
+    sudo dpkg --configure -a
+
+    log_success "Sistema preparado."
+}
+
+# ==================================================
+# Activar repositorios de Ubuntu
+# ==================================================
+enable_jammy_repositories() {
+    log_step "2/7 - Activando temporalmente los repositorios Ubuntu Jammy"
+
+    # No sobrescribir configuraciones preexistentes.
+    if sudo test -e "$JAMMY_FILE"; then
+        die "Ya existe $JAMMY_FILE. Revisa su contenido antes de continuar."
+    fi
+
+    cat > "$JAMMY_TMP" <<'EOF'
+deb https://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+deb https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+deb https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+EOF
+
+    # Instalar el fichero temporal sin modificar los repositorios existentes.
+    if ! sudo install -o root -g root -m 644 "$JAMMY_TMP" "$JAMMY_FILE"; then
+        rm -f "$JAMMY_TMP"
+        die "No se han podido activar los repositorios temporales."
+    fi
+
+    rm -f "$JAMMY_TMP"
+
+    # Marcarlo antes de actualizar para que EXIT pueda limpiarlo
+    # incluso si apt-get update falla.
+    JAMMY_ENABLED=1
+
+    log_info "Actualizando los índices de APT..."
+
+    sudo apt-get update ||
+        die "Ha fallado apt-get update. Se retirarán los repositorios temporales."
+
+    log_success "Repositorios Ubuntu Jammy activados."
+}
+
+# ==================================================
+# Descarga y validación del instalador
+# ==================================================
+
+download_package() {
+    log_step "3/7 - Descargando Packet Tracer ${VERSION}"
+
+    local temp_file="${DEB_FILE}.part"
+
+    if [[ -s "$DEB_FILE" ]] &&
+       dpkg-deb --info "$DEB_FILE" >/dev/null 2>&1; then
+        log_info "Se reutilizará el paquete existente:"
+        printf '       %s\n' "$DEB_FILE"
+    else
+        rm -f "$DEB_FILE" "$temp_file"
+
+        log_info "Origen: ${DOWNLOAD_URL}"
+        log_info "Destino: ${DEB_FILE}"
+
+        if ! curl --fail --location --show-error \
+            --retry 3 --retry-delay 2 \
+            --output "$temp_file" "$DOWNLOAD_URL"; then
+            rm -f "$temp_file"
+            die "No se ha podido descargar Packet Tracer."
+        fi
+
+        if [[ ! -s "$temp_file" ]] ||
+           ! dpkg-deb --info "$temp_file" >/dev/null 2>&1; then
+            rm -f "$temp_file"
+            die "El archivo descargado no es un paquete DEB válido."
+        fi
+
+        mv "$temp_file" "$DEB_FILE"
+    fi
+
+    log_success "Paquete disponible y validado."
+}
+
+# ==================================================
+# Instalación
+# ==================================================
+
+install_package() {
+    log_step "4/7 - Instalando Packet Tracer"
+
+    log_info "Instalando el paquete DEB..."
+
+    if ! sudo dpkg -i "$DEB_FILE"; then
+        log_warning "dpkg ha detectado un error. Intentando resolver dependencias..."
+
+        sudo apt-get --fix-broken install -y ||
+            die "No se han podido resolver las dependencias."
+
+        sudo dpkg -i "$DEB_FILE" ||
+            die "La instalación del paquete ha fallado."
+    fi
+
+    log_info "Comprobando el estado de los paquetes..."
+    sudo dpkg --configure -a
+
+    if ! dpkg-query -W \
+        -f='${Status}\n' packettracer 2>/dev/null |
+        grep -qx 'install ok installed'; then
+        die "Packet Tracer no figura como instalado."
+    fi
+
+    log_success "Packet Tracer instalado correctamente."
+}
+
+# ==================================================
+# Instalación del icono
+# ==================================================
+
+install_icon() {
+    log_step "5/7 - Instalando el icono"
+
+    local temp_icon
+    temp_icon="$(mktemp "${TMPDIR:-/tmp}/packettracer-icon.XXXXXX")"
+
+    if ! curl --fail --location --show-error \
+        --retry 3 --retry-delay 2 \
+        --output "$temp_icon" "$ICON_URL"; then
+        rm -f "$temp_icon"
+        die "No se ha podido descargar el icono."
+    fi
+
+    if [[ ! -s "$temp_icon" ]] ||
+       ! file "$temp_icon" | grep -qi 'PNG image data'; then
+        rm -f "$temp_icon"
+        die "El archivo descargado no parece ser una imagen PNG válida."
+    fi
+
+    sudo install -d -m 755 "$ICON_DIR"
+    sudo install -m 644 "$temp_icon" "$ICON_FILE"
+
+    rm -f "$temp_icon"
+
+    log_success "Icono instalado en ${ICON_FILE}."
+}
+
+# ==================================================
+# Acceso directo
+# ==================================================
+
+create_shortcut() {
+    log_step "6/7 - Creando acceso directo"
+
+    local executable="/usr/local/bin/packettracer"
+
+    if [[ ! -x "$executable" ]]; then
+        executable="$(command -v packettracer || true)"
+    fi
+
+    [[ -n "$executable" && -x "$executable" ]] ||
+        die "No se encuentra el ejecutable de Packet Tracer."
+
+    cat > "$DESKTOP_TMP" <<EOF
 [Desktop Entry]
-Version=9.0.0
-Name=Cisco Packet Tracer
-Comment=Network Simulation Tool
-Exec=/usr/local/bin/packettracer
-Icon=/opt/pt/art/app.png
-Terminal=false
+Version=1.0
 Type=Application
+Name=${APP_NAME}
+Comment=Herramienta de simulación de redes
+Exec=${executable} --no-sandbox --accept-eula
+Icon=${ICON_FILE}
+Terminal=false
 Categories=Education;Network;
 StartupNotify=true
 EOF
 
-sudo chmod 644 /usr/share/applications/packettracer.desktop
+    sudo install -m 644 "$DESKTOP_TMP" "$DESKTOP_FILE"
 
-# --------------------------------------------------
-# Actualizar menú de aplicaciones
-# --------------------------------------------------
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        sudo update-desktop-database /usr/share/applications
+    fi
 
-echo
-echo "----------------------------------"
-echo "  Actualizando menú..."
-echo "----------------------------------"
+    log_success "Acceso directo creado."
+}
 
-if command -v update-desktop-database >/dev/null 2>&1; then
-    sudo update-desktop-database /usr/share/applications
-fi
+# ==================================================
+# Resumen final
+# ==================================================
 
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
-fi
+show_summary() {
+    log_step "7/7 - Verificación final"
 
-# --------------------------------------------------
-# Desactivar/restaurar repositorios
-# --------------------------------------------------
+    printf '\n'
+    printf '%b==========================================%b\n' "$GREEN" "$RESET"
+    printf '  INSTALACIÓN COMPLETADA\n'
+    printf '%b==========================================%b\n' "$GREEN" "$RESET"
 
-echo
-echo "----------------------------------"
-echo "  Restaurando repositorios..."
-echo "----------------------------------"
+    printf '\n'
+    printf '  Aplicación:     %s %s\n' "$APP_NAME" "$VERSION"
+    printf '  Instalador:     %s\n' "$DEB_FILE"
+    printf '  Acceso directo: %s\n' "$DESKTOP_FILE"
+    printf '  Icono:          %s\n' "$ICON_FILE"
 
-if [ -f /etc/apt/sources.list.backup-packettracer ]; then
-    sudo cp /etc/apt/sources.list.backup-packettracer /etc/apt/sources.list
-    sudo rm /etc/apt/sources.list.backup-packettracer
-fi
+    printf '\n'
+    printf '  Puedes abrir Packet Tracer desde el menú de aplicaciones\n'
+    printf '  o ejecutando:\n\n'
+    printf '      packettracer\n\n'
 
-sudo apt update
+    log_success "Proceso finalizado sin errores."
+}
 
-# --------------------------------------------------
-# Final
-# --------------------------------------------------
+# ==================================================
+# Ejecución principal
+# ==================================================
 
-echo
-echo "=========================================="
-echo "   INSTALACIÓN FINALIZADA"
-echo "=========================================="
-echo
-echo "Cisco Packet Tracer 9.0 ha sido instalado."
-echo
-echo "Puedes abrirlo desde:"
-echo "  Aplicaciones → Educación → Cisco Packet Tracer"
-echo
-echo "O ejecutando:"
-echo "  packettracer"
-echo
-echo "El instalador se ha guardado en:"
-echo "  $DEB_FILE"
-echo
+main() {
+    printf '\n'
+    printf '%b==========================================%b\n' "$BLUE" "$RESET"
+    printf '  INSTALADOR CISCO PACKET TRACER %s\n' "$VERSION"
+    printf '%b==========================================%b\n' "$BLUE" "$RESET"
+
+    check_requirements
+    enable_jammy_repositories
+    prepare_system
+    download_package
+    install_package
+    install_icon
+    create_shortcut
+    show_summary
+}
+
+main "$@"
