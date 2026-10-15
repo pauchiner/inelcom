@@ -5,7 +5,7 @@ IFS=$'\n\t'
 umask 022
 
 # ==================================================
-# Cisco Packet Tracer 9.0.0 - Instalador
+# Cisco Packet Tracer - Instalador
 # ==================================================
 
 readonly VERSION="9.0.0"
@@ -23,7 +23,6 @@ readonly DESKTOP_FILE="/usr/share/applications/packettracer.desktop"
 readonly DESKTOP_TMP="/tmp/packettracer.desktop.$$"
 readonly PACKETTRACER_APP="/opt/pt/packettracer.AppImage"
 readonly EULA_STATE_DIR=".local/.packettracer"
-readonly ACTIVE_VERSION_CONTENT=":b3ff134c88b008deda94147e4c7ac664:${PACKETTRACER_APP}"
 
 readonly JAMMY_FILE="/etc/apt/sources.list.d/packettracer-jammy-temp.list"
 readonly JAMMY_TMP="/tmp/packettracer-jammy-$$.list"
@@ -280,7 +279,6 @@ install_package() {
 provision_eula_state() {
     log_step "5/8 - Preparando la EULA para todos los usuarios"
 
-    local temp_dir active_version_file eula_file
     local uid_min username uid gid home shell user_state_dir
     local configured=0
 
@@ -289,10 +287,8 @@ provision_eula_state() {
         die "No se encuentra el ejecutable esperado: $PACKETTRACER_APP"
 
     temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/packettracer-eula.XXXXXX")"
-    active_version_file="${temp_dir}/active-version"
     eula_file="${temp_dir}/eula-"
 
-    printf '%s\\n' "$ACTIVE_VERSION_CONTENT" > "$active_version_file"
     cat > "$eula_file" <<'EULA'
 Cisco Packet Tracer Software License Agreement
 
@@ -301,8 +297,6 @@ EULA
 
     # Instalar en /etc/skel para cuentas nuevas.
     sudo install -d -o root -g root -m 755 "/etc/skel/${EULA_STATE_DIR}"
-    sudo install -o root -g root -m 644 "$active_version_file" \
-        "/etc/skel/${EULA_STATE_DIR}/active-version"
     sudo install -o root -g root -m 644 "$eula_file" \
         "/etc/skel/${EULA_STATE_DIR}/eula-"
 
@@ -318,8 +312,6 @@ EULA
 
         user_state_dir="${home}/${EULA_STATE_DIR}"
         sudo install -d -o "$uid" -g "$gid" -m 755 "$user_state_dir"
-        sudo install -o "$uid" -g "$gid" -m 644 "$active_version_file" \
-            "${user_state_dir}/active-version"
         sudo install -o "$uid" -g "$gid" -m 644 "$eula_file" \
             "${user_state_dir}/eula-"
 
@@ -381,11 +373,11 @@ create_shortcut() {
 
     cat > "$DESKTOP_TMP" <<EOF
 [Desktop Entry]
-Version=1.0
+Version=${VERSION}
 Type=Application
 Name=${APP_NAME}
 Comment=Herramienta de simulación de redes
-Exec=${executable} --no-sandbox --accept-eula
+Exec=${executable}
 Icon=${ICON_FILE}
 Terminal=false
 Categories=Education;Network;
@@ -425,6 +417,9 @@ show_summary() {
     printf '      packettracer\n\n'
 
     log_success "Proceso finalizado sin errores."
+    printf '\n'
+    printf '  Creado por Pau Chiner y Eva Buendia\n'
+    printf '  Inelcom 2026\n'
 }
 
 # ==================================================
