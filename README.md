@@ -1,6 +1,6 @@
 # Cisco Packet Tracer 9.0.0 — LliureX
 
-Script de instalación automatizada de **Cisco Packet Tracer 9.0.0** en sistemas LliureX basados en Ubuntu.
+Script de instalación automatizada de **Cisco Packet Tracer 9.0.0** en sistemas LliureX.
 
 El instalador automatiza la preparación del sistema, la activación temporal de los repositorios de Ubuntu Jammy, la instalación de dependencias, la descarga del paquete DEB, la instalación del icono y la creación del acceso directo en el menú de aplicaciones.
 
@@ -18,11 +18,9 @@ El instalador automatiza la preparación del sistema, la activación temporal de
 ## Requisitos
 
 - LliureX con acceso a Internet.
-- Arquitectura compatible con el paquete DEB de 64 bits.
 - Permisos de `sudo`.
 - Herramientas `curl`, `dpkg`, `dpkg-deb`, `apt-get` e `install`.
 - Acceso a los repositorios de Ubuntu Jammy.
-- Una sesión de terminal.
 
 ## Instalación
 
@@ -35,6 +33,8 @@ chmod +x setup.sh
 ```
 
 El instalador solicitará la contraseña de `sudo` cuando sea necesario.
+También pedirá aceptar el EULA durante el proceso de instalación (Esto solo ocurre durante la instalación
+después estará disponible para todos los usuarios con la EULA ya activada)
 
 Una vez finalizado, podrás abrir Packet Tracer desde el menú de aplicaciones, en la categoría **Educación**, o ejecutando:
 
