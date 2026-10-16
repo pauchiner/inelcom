@@ -545,7 +545,7 @@ show_summary() {
 main() {
     printf '\n'
     printf '%b==========================================%b\n' "$BLUE" "$RESET"
-    printf '  INSTALADOR CISCO PACKET TRACER %s\n'     \|"$VERSION"
+    printf '  INSTALADOR CISCO PACKET TRACER %s\n' "$VERSION"
     printf '%b==========================================%b\n' "$BLUE" "$RESET"
 
     check_requirements
