@@ -58,6 +58,34 @@ log_warning() { printf '%b[AVISO]%b %s\n' "$YELLOW" "$RESET" "$*" >&2; }
 log_error()   { printf '%b[ERROR]%b %s\n' "$RED" "$RESET" "$*" >&2; }
 log_step()    { printf '\n%b==> %s%b\n' "$BLUE" "$*" "$RESET"; }
 
+log_task() {
+    local message="$1"
+    shift
+
+    if [[ ! -t 1 ]]; then
+        "$@" >>"$LOG_FILE" 2>&1
+        return $?
+    fi
+
+    local frames='|/-\' frame_index=0 pid status
+    "$@" >>"$LOG_FILE" 2>&1 &
+    pid=$!
+
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r\033[K%b[%s]%b %s' "$TEAL" "${frames:frame_index%4:1}" "$RESET" "$message"
+        frame_index=$((frame_index + 1))
+        sleep 0.12
+    done
+
+    if wait "$pid"; then
+        printf '\r\033[K%b[OK]%b %s\n' "$GREEN" "$RESET" "$message"
+    else
+        status=$?
+        printf '\r\033[K%b[ERROR]%b %s\n' "$RED" "$RESET" "$message" >&2
+        return "$status"
+    fi
+}
+
 show_command_log() {
     if [[ -s "${LOG_FILE:-}" ]]; then
         printf '\n%b--- Detalles técnicos (últimas 60 líneas) ---%b\n' "$YELLOW" "$RESET" >&2
@@ -161,17 +189,17 @@ check_requirements() {
 prepare_system() {
     log_step "Preparando el sistema"
 
-    log_info "Configurando paquetes pendientes..."
-    sudo dpkg --configure -a >>"$LOG_FILE" 2>&1 ||
+    log_task "Configurando paquetes pendientes" sudo dpkg --configure -a ||
         die "No se han podido configurar los paquetes pendientes."
 
-    log_info "Eliminando paquetes anteriores..."
+    log_info "Eliminando paquetes anteriores"
     local old_package found_old_package=0
     for old_package in packettracer packet-tracer; do
         if dpkg-query -W -f='${Status}\n' "$old_package" 2>/dev/null |
             grep -qx 'install ok installed'; then
             found_old_package=1
-            sudo apt-get remove --purge -y -qq "$old_package" >>"$LOG_FILE" 2>&1 ||
+            log_task "Eliminando paquete anterior: ${old_package}" \
+                sudo apt-get remove --purge -y -qq "$old_package" ||
                 die "No se ha podido eliminar el paquete ${old_package}."
         fi
     done
@@ -180,20 +208,20 @@ prepare_system() {
         log_info "No se han encontrado paquetes anteriores instalados."
     fi
 
-    log_info "Eliminando accesos directos anteriores..."
+    log_info "Eliminando accesos directos anteriores"
     sudo rm -f -- \
         /usr/share/applications/packettracer.desktop \
         /usr/share/applications/cisco-ptsa821.desktop \
         /usr/share/applications/cisco-pt821.desktop \
         /usr/share/icons/packettracer.png
 
-    log_info "Eliminando instalaciones anteriores..."
+    log_info "Eliminando instalaciones anteriores"
     sudo rm -rf -- \
         /usr/local/packettracer \
         /opt/packettracer \
         /opt/pt
 
-    log_info "Eliminando configuraciones anteriores de usuarios..."
+    log_info "Eliminando configuraciones anteriores de usuarios"
 
     local uid_min username uid gid home users_checked=0
 
@@ -223,8 +251,7 @@ prepare_system() {
 
     log_info "Usuarios revisados: ${users_checked}"
 
-    log_info "Limpiando la caché de paquetes..."
-    sudo apt-get autoclean -qq >>"$LOG_FILE" 2>&1 ||
+    log_task "Limpiando la caché de paquetes" sudo apt-get autoclean -qq ||
         die "No se ha podido limpiar la caché de APT."
 
     log_success "Sistema preparado."
@@ -255,8 +282,7 @@ EOF
     rm -f -- "$JAMMY_TMP"
     JAMMY_ENABLED=1
 
-    log_info "Actualizando los índices de APT..."
-    sudo apt-get update -qq >>"$LOG_FILE" 2>&1 ||
+    log_task "Actualizando los índices de APT" sudo apt-get update -qq ||
         die "Ha fallado apt-get update. Se retirarán los repositorios temporales."
 
     log_success "Repositorios Ubuntu Jammy activados."
@@ -301,9 +327,10 @@ download_package() {
         log_info "Origen: ${DOWNLOAD_URL}"
         log_info "Destino: ${DEB_FILE}"
 
-        if ! curl --fail --location --silent --show-error \
+        if ! log_task "Descargando Packet Tracer" \
+            curl --fail --location --silent --show-error \
             --retry 3 --retry-delay 2 \
-            --output "$TEMP_DEB" "$DOWNLOAD_URL" >>"$LOG_FILE" 2>&1; then
+            --output "$TEMP_DEB" "$DOWNLOAD_URL"; then
             rm -f -- "$TEMP_DEB"
             die "No se ha podido descargar Packet Tracer."
         fi
@@ -323,20 +350,17 @@ download_package() {
 install_package() {
     log_step "4/8 - Instalando Packet Tracer"
 
-    log_info "Instalando el paquete DEB..."
-
-    if ! sudo dpkg -i "$DEB_FILE" >>"$LOG_FILE" 2>&1; then
+    if ! log_task "Instalando el paquete DEB" sudo dpkg -i "$DEB_FILE"; then
         log_warning "dpkg ha detectado un error. Intentando resolver dependencias..."
 
-        sudo apt-get --fix-broken install -y -qq >>"$LOG_FILE" 2>&1 ||
+        log_task "Resolviendo dependencias" sudo apt-get --fix-broken install -y -qq ||
             die "No se han podido resolver las dependencias."
 
-        sudo dpkg -i "$DEB_FILE" >>"$LOG_FILE" 2>&1 ||
+        log_task "Reintentando la instalación de Packet Tracer" sudo dpkg -i "$DEB_FILE" ||
             die "La instalación del paquete ha fallado."
     fi
 
-    log_info "Comprobando el estado de los paquetes..."
-    sudo dpkg --configure -a >>"$LOG_FILE" 2>&1 ||
+    log_task "Configurando los paquetes instalados" sudo dpkg --configure -a ||
         die "No se han podido configurar los paquetes después de la instalación."
 
     if ! dpkg-query -W -f='${Status}\n' packettracer 2>/dev/null |
@@ -412,9 +436,10 @@ install_icon() {
 
     TEMP_ICON="$(mktemp "${TMPDIR:-/tmp}/packettracer-icon.XXXXXX")"
 
-    if ! curl --fail --location --silent --show-error \
+    if ! log_task "Descargando el icono" \
+        curl --fail --location --silent --show-error \
         --retry 3 --retry-delay 2 \
-        --output "$TEMP_ICON" "$ICON_URL" >>"$LOG_FILE" 2>&1; then
+        --output "$TEMP_ICON" "$ICON_URL"; then
         die "No se ha podido descargar el icono."
     fi
 
@@ -507,7 +532,7 @@ show_summary() {
     printf '      packettracer\n\n'
 
     printf '\n'
-    printf '  Creado por %bPau Chiner%b y %bEva Buendia%b.\n' "$BLUE" "$RESET" "$BLUE" "$RESET"
+    printf '  Creado por %bPau Chiner%b y %bEva Buendia%b\n' "$BLUE" "$RESET" "$BLUE" "$RESET"
     printf '\n'
     printf '  %bInelcom 2026%b\n' "$TEAL" "$RESET"
     printf '\n'
@@ -520,7 +545,7 @@ show_summary() {
 main() {
     printf '\n'
     printf '%b==========================================%b\n' "$BLUE" "$RESET"
-    printf '  INSTALADOR CISCO PACKET TRACER %s\n' "$VERSION"
+    printf '  INSTALADOR CISCO PACKET TRACER %s\n'     |"$VERSION"
     printf '%b==========================================%b\n' "$BLUE" "$RESET"
 
     check_requirements
