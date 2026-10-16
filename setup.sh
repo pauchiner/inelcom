@@ -165,7 +165,7 @@ prepare_system() {
     sudo dpkg --configure -a >>"$LOG_FILE" 2>&1 ||
         die "No se han podido configurar los paquetes pendientes."
 
-    log_info "Eliminando paquetes anteriores"
+    log_info "Eliminando paquetes anteriores..."
     local old_package found_old_package=0
     for old_package in packettracer packet-tracer; do
         if dpkg-query -W -f='${Status}\n' "$old_package" 2>/dev/null |
@@ -180,20 +180,20 @@ prepare_system() {
         log_info "No se han encontrado paquetes anteriores instalados."
     fi
 
-    log_info "Eliminando accesos directos anteriores"
+    log_info "Eliminando accesos directos anteriores..."
     sudo rm -f -- \
         /usr/share/applications/packettracer.desktop \
         /usr/share/applications/cisco-ptsa821.desktop \
         /usr/share/applications/cisco-pt821.desktop \
         /usr/share/icons/packettracer.png
 
-    log_info "Eliminando instalaciones anteriores"
+    log_info "Eliminando instalaciones anteriores..."
     sudo rm -rf -- \
         /usr/local/packettracer \
         /opt/packettracer \
         /opt/pt
 
-    log_info "Eliminando configuraciones anteriores de usuarios"
+    log_info "Eliminando configuraciones anteriores de usuarios..."
 
     local uid_min username uid gid home users_checked=0
 
@@ -223,7 +223,7 @@ prepare_system() {
 
     log_info "Usuarios revisados: ${users_checked}"
 
-    log_info "Limpiando la caché de paquetes"
+    log_info "Limpiando la caché de paquetes..."
     sudo apt-get autoclean -qq >>"$LOG_FILE" 2>&1 ||
         die "No se ha podido limpiar la caché de APT."
 
@@ -507,7 +507,7 @@ show_summary() {
     printf '      packettracer\n\n'
 
     printf '\n'
-    printf '  Creado por %bPau Chiner%b y %bEva Buendia%b\n' "$BLUE" "$RESET" "$BLUE" "$RESET"
+    printf '  Creado por %bPau Chiner%b y %bEva Buendia%b.\n' "$BLUE" "$RESET" "$BLUE" "$RESET"
     printf '\n'
     printf '  %bInelcom 2026%b\n' "$TEAL" "$RESET"
     printf '\n'
