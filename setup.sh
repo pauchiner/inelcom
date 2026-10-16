@@ -36,12 +36,14 @@ TEMP_DEB=""
 
 if [[ -t 1 ]]; then
     readonly GREEN='\033[0;32m'
+    readonly TEAL='\033[0;36m'
     readonly YELLOW='\033[0;33m'
     readonly RED='\033[0;31m'
     readonly BLUE='\033[0;34m'
     readonly RESET='\033[0m'
 else
     readonly GREEN=''
+    readonly TEAL=''
     readonly YELLOW=''
     readonly RED=''
     readonly BLUE=''
@@ -78,19 +80,13 @@ cleanup() {
     if (( JAMMY_ENABLED )); then
         log_info "Desactivando los repositorios temporales de Ubuntu Jammy..."
 
-        if sudo rm -f -- "$JAMMY_FILE"; then
+        if sudo rm -f -- "$JAMMY_FILE" >/dev/null 2>&1; then
             JAMMY_ENABLED=0
 
-            if sudo apt-get update; then
-                log_success "Configuración de APT restaurada."
-            else
-                log_error "No se han podido actualizar los índices tras retirar Jammy."
-                log_warning "El fichero temporal se ha eliminado, pero revisa APT."
+            if ! sudo apt-get update -qq >/dev/null 2>&1; then
                 (( exit_code == 0 )) && exit_code=1
             fi
         else
-            log_error "No se ha podido retirar el fichero temporal de Jammy."
-            log_error "Revisa manualmente: $JAMMY_FILE"
             (( exit_code == 0 )) && exit_code=1
         fi
     fi
@@ -494,8 +490,9 @@ show_summary() {
 
     log_success "Proceso finalizado sin errores."
     printf '\n'
-    printf '  Creado por Pau Chiner y Eva Buendia\n'
-    printf '  Inelcom 2026\n'
+    printf '  Creado por %bPau Chiner%b y %bEva Buendia%b\n' "$BLUE" "$RESET" "$BLUE" "$RESET"
+    printf '  %bInelcom 2026%b\n' "$TEAL" "$RESET"
+    printf '\n'
 }
 
 # ==================================================
@@ -516,6 +513,10 @@ main() {
     provision_eula_state
     install_icon
     create_shortcut
+
+    trap - EXIT
+    cleanup
+
     show_summary
 }
 
