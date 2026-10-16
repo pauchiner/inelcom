@@ -29,6 +29,8 @@ DESKTOP_TMP=""
 TEMP_DIR=""
 TEMP_ICON=""
 TEMP_DEB=""
+LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/packettracer-install.XXXXXX.log")"
+chmod 600 "$LOG_FILE"
 
 # ==================================================
 # Colores y mensajes
@@ -56,8 +58,18 @@ log_warning() { printf '%b[AVISO]%b %s\n' "$YELLOW" "$RESET" "$*" >&2; }
 log_error()   { printf '%b[ERROR]%b %s\n' "$RED" "$RESET" "$*" >&2; }
 log_step()    { printf '\n%b==> %s%b\n' "$BLUE" "$*" "$RESET"; }
 
+show_command_log() {
+    if [[ -s "${LOG_FILE:-}" ]]; then
+        printf '\n%b--- Detalles técnicos (últimas 60 líneas) ---%b\n' "$YELLOW" "$RESET" >&2
+        tail -n 60 -- "$LOG_FILE" >&2 || true
+        printf '%b--- Fin de los detalles técnicos ---%b\n' "$YELLOW" "$RESET" >&2
+        printf 'Log completo: %s\n' "$LOG_FILE" >&2
+    fi
+}
+
 die() {
     log_error "$*"
+    show_command_log
     exit 1
 }
 
@@ -78,17 +90,21 @@ cleanup() {
     rm -f -- "$JAMMY_TMP"
 
     if (( JAMMY_ENABLED )); then
-        log_info "Desactivando los repositorios temporales de Ubuntu Jammy..."
-
-        if sudo rm -f -- "$JAMMY_FILE" >/dev/null 2>&1; then
+        if sudo rm -f -- "$JAMMY_FILE" >>"$LOG_FILE" 2>&1; then
             JAMMY_ENABLED=0
 
-            if ! sudo apt-get update -qq >/dev/null 2>&1; then
+            if ! sudo apt-get update -qq >>"$LOG_FILE" 2>&1; then
                 (( exit_code == 0 )) && exit_code=1
             fi
         else
             (( exit_code == 0 )) && exit_code=1
         fi
+    fi
+
+    if (( exit_code == 0 )); then
+        rm -f -- "$LOG_FILE"
+    elif [[ -s "$LOG_FILE" ]]; then
+        log_warning "Se conserva el log técnico en: $LOG_FILE"
     fi
 
     exit "$exit_code"
@@ -103,6 +119,7 @@ on_error() {
     log_error "Comando: ${command}"
     log_error "Código de salida: ${exit_code}"
     log_error "Consulta los mensajes anteriores para identificar la causa."
+    show_command_log
 
     exit "$exit_code"
 }
@@ -145,7 +162,7 @@ prepare_system() {
     log_step "Preparando el sistema"
 
     log_info "Configurando paquetes pendientes..."
-    sudo dpkg --configure -a ||
+    sudo dpkg --configure -a >>"$LOG_FILE" 2>&1 ||
         die "No se han podido configurar los paquetes pendientes."
 
     log_info "Eliminando paquetes anteriores"
@@ -154,7 +171,7 @@ prepare_system() {
         if dpkg-query -W -f='${Status}\n' "$old_package" 2>/dev/null |
             grep -qx 'install ok installed'; then
             found_old_package=1
-            sudo apt-get remove --purge -y "$old_package" ||
+            sudo apt-get remove --purge -y -qq "$old_package" >>"$LOG_FILE" 2>&1 ||
                 die "No se ha podido eliminar el paquete ${old_package}."
         fi
     done
@@ -207,7 +224,7 @@ prepare_system() {
     log_info "Usuarios revisados: ${users_checked}"
 
     log_info "Limpiando la caché de paquetes"
-    sudo apt-get autoclean ||
+    sudo apt-get autoclean -qq >>"$LOG_FILE" 2>&1 ||
         die "No se ha podido limpiar la caché de APT."
 
     log_success "Sistema preparado."
@@ -230,7 +247,7 @@ deb https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe mul
 deb https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
 EOF
 
-    if ! sudo install -o root -g root -m 644 "$JAMMY_TMP" "$JAMMY_FILE"; then
+    if ! sudo install -o root -g root -m 644 "$JAMMY_TMP" "$JAMMY_FILE" >>"$LOG_FILE" 2>&1; then
         rm -f -- "$JAMMY_TMP"
         die "No se han podido activar los repositorios temporales."
     fi
@@ -239,7 +256,7 @@ EOF
     JAMMY_ENABLED=1
 
     log_info "Actualizando los índices de APT..."
-    sudo apt-get update ||
+    sudo apt-get update -qq >>"$LOG_FILE" 2>&1 ||
         die "Ha fallado apt-get update. Se retirarán los repositorios temporales."
 
     log_success "Repositorios Ubuntu Jammy activados."
@@ -284,9 +301,9 @@ download_package() {
         log_info "Origen: ${DOWNLOAD_URL}"
         log_info "Destino: ${DEB_FILE}"
 
-        if ! curl --fail --location --show-error \
+        if ! curl --fail --location --silent --show-error \
             --retry 3 --retry-delay 2 \
-            --output "$TEMP_DEB" "$DOWNLOAD_URL"; then
+            --output "$TEMP_DEB" "$DOWNLOAD_URL" >>"$LOG_FILE" 2>&1; then
             rm -f -- "$TEMP_DEB"
             die "No se ha podido descargar Packet Tracer."
         fi
@@ -308,18 +325,18 @@ install_package() {
 
     log_info "Instalando el paquete DEB..."
 
-    if ! sudo dpkg -i "$DEB_FILE"; then
+    if ! sudo dpkg -i "$DEB_FILE" >>"$LOG_FILE" 2>&1; then
         log_warning "dpkg ha detectado un error. Intentando resolver dependencias..."
 
-        sudo apt-get --fix-broken install -y ||
+        sudo apt-get --fix-broken install -y -qq >>"$LOG_FILE" 2>&1 ||
             die "No se han podido resolver las dependencias."
 
-        sudo dpkg -i "$DEB_FILE" ||
+        sudo dpkg -i "$DEB_FILE" >>"$LOG_FILE" 2>&1 ||
             die "La instalación del paquete ha fallado."
     fi
 
     log_info "Comprobando el estado de los paquetes..."
-    sudo dpkg --configure -a ||
+    sudo dpkg --configure -a >>"$LOG_FILE" 2>&1 ||
         die "No se han podido configurar los paquetes después de la instalación."
 
     if ! dpkg-query -W -f='${Status}\n' packettracer 2>/dev/null |
@@ -395,9 +412,9 @@ install_icon() {
 
     TEMP_ICON="$(mktemp "${TMPDIR:-/tmp}/packettracer-icon.XXXXXX")"
 
-    if ! curl --fail --location --show-error \
+    if ! curl --fail --location --silent --show-error \
         --retry 3 --retry-delay 2 \
-        --output "$TEMP_ICON" "$ICON_URL"; then
+        --output "$TEMP_ICON" "$ICON_URL" >>"$LOG_FILE" 2>&1; then
         die "No se ha podido descargar el icono."
     fi
 
@@ -449,7 +466,8 @@ EOF
     sudo install -o root -g root -m 644 "$DESKTOP_TMP" "$DESKTOP_FILE"
 
     if command -v update-desktop-database >/dev/null 2>&1; then
-        sudo update-desktop-database /usr/share/applications
+        sudo update-desktop-database /usr/share/applications >>"$LOG_FILE" 2>&1 ||
+            die "No se ha podido actualizar la base de datos de aplicaciones."
     fi
 
     rm -f -- "$DESKTOP_TMP"
@@ -488,9 +506,9 @@ show_summary() {
     printf '  o ejecutando:\n\n'
     printf '      packettracer\n\n'
 
-    log_success "Proceso finalizado sin errores."
     printf '\n'
     printf '  Creado por %bPau Chiner%b y %bEva Buendia%b\n' "$BLUE" "$RESET" "$BLUE" "$RESET"
+    printf '\n'
     printf '  %bInelcom 2026%b\n' "$TEAL" "$RESET"
     printf '\n'
 }
@@ -513,11 +531,8 @@ main() {
     provision_eula_state
     install_icon
     create_shortcut
-
-    trap - EXIT
-    cleanup
-
     show_summary
+    cleanup
 }
 
 main "$@"
