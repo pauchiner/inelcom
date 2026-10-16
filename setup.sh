@@ -161,7 +161,63 @@ prepare_system() {
     log_step "Preparando el sistema"
 
     log_info "Configurando paquetes pendientes..."
-    sudo dpkg --configure -a
+    if ! sudo dpkg --configure -a; then
+        log_error "No se han podido configurar los paquetes pendientes."
+        return 1
+    fi
+
+    log_info "Eliminando paquetes anteriores"
+    sudo apt remove --purge -y packettracer packet-tracer 2>/dev/null || true
+
+    log_info "Eliminando accesos directos anteriores"
+    sudo rm -f -- \
+        /usr/share/applications/packettracer.desktop \
+        /usr/share/applications/cisco-ptsa821.desktop \
+        /usr/share/applications/cisco-pt821.desktop \
+        /usr/share/icons/packettracer.png
+
+    log_info "Eliminando instalaciones anteriores"
+    sudo rm -rf -- \
+        /usr/local/packettracer \
+        /opt/packettracer \
+        /opt/pt
+
+    log_info "Eliminando configuraciones anteriores de todos los usuarios"
+
+    local uid_min username uid gid home users_checked=0
+
+    uid_min="$(awk '$1 == "UID_MIN" { print $2; exit }' \
+        /etc/login.defs 2>/dev/null || true)"
+    [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
+
+    while IFS=: read -r username _ uid gid _ home _; do
+        [[ "$uid" =~ ^[0-9]+$ ]] || continue
+        (( uid >= uid_min )) || continue
+        [[ -n "$home" && "$home" != "/" && -d "$home" ]] || continue
+
+        # Evitar directorios home que sean enlaces simbólicos.
+        [[ ! -L "$home" ]] || continue
+
+        sudo rm -rf -- \
+            "${home}/.config/Cisco-PacketTracer" \
+            "${home}/.config/packettracer" \
+            "${home}/.local/share/PacketTracer" \
+            "${home}/PacketTracer" || {
+                log_error "Error eliminando configuraciones de ${username}."
+                return 1
+            }
+
+        ((users_checked += 1))
+        log_info "Configuraciones revisadas para ${username}"
+    done < <(getent passwd)
+
+    log_info "Usuarios revisados: ${users_checked}"
+
+    log_info "Limpiando la caché de paquetes"
+    if ! sudo apt autoclean; then
+        log_error "No se ha podido limpiar la caché de APT."
+        return 1
+    fi
 
     log_success "Sistema preparado."
 }
@@ -172,7 +228,6 @@ prepare_system() {
 enable_jammy_repositories() {
     log_step "2/8 - Activando temporalmente los repositorios Ubuntu Jammy"
 
-    # No sobrescribir configuraciones preexistentes.
     if sudo test -e "$JAMMY_FILE"; then
         die "Ya existe $JAMMY_FILE. Revisa su contenido antes de continuar."
     fi
@@ -183,7 +238,6 @@ deb https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe mul
 deb https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
 EOF
 
-    # Instalar el fichero temporal sin modificar los repositorios existentes.
     if ! sudo install -o root -g root -m 644 "$JAMMY_TMP" "$JAMMY_FILE"; then
         rm -f "$JAMMY_TMP"
         die "No se han podido activar los repositorios temporales."
@@ -191,8 +245,6 @@ EOF
 
     rm -f "$JAMMY_TMP"
 
-    # Marcarlo antes de actualizar para que EXIT pueda limpiarlo
-    # incluso si apt-get update falla.
     JAMMY_ENABLED=1
 
     log_info "Actualizando los índices de APT..."
@@ -282,7 +334,6 @@ provision_eula_state() {
     local uid_min username uid gid home shell user_state_dir
     local configured=0
 
-    # Comprobar que el ejecutable existe antes de crear el estado de aceptación.
     sudo test -x "$PACKETTRACER_APP" ||
         die "No se encuentra el ejecutable esperado: $PACKETTRACER_APP"
 
@@ -295,16 +346,13 @@ Cisco Packet Tracer Software License Agreement
 DOWNLOADING, INSTALLING, OR USING THE CISCO PACKET TRACER SOFTWARE CONSTITUTES ACCEPTANCE OF THE CISCO END USER LICENSE AGREEMENT ("EULA" https://www.cisco.com/c/en/us/about/legal/cloud-and-software/end_user_license_agreement.html) AND THE SUPPLEMENTAL END USER LICENSE AGREEMENT FOR CISCO PACKET TRACER ("SEULA" https://www.cisco.com/c/dam/en_us/about/doing_business/legal/seula/cisco-packet-tracer-software.pdf). IF YOU DO NOT AGREE TO ALL OF THE TERMS OF THE EULA AND SEULA, THEN CISCO SYSTEMS, INC. ("CISCO") IS UNWILLING TO LICENSE THE SOFTWARE TO YOU AND YOU ARE NOT AUTHORIZED TO DOWNLOAD, INSTALL OR USE THE SOFTWARE.
 EULA
 
-    # Instalar en /etc/skel para cuentas nuevas.
     sudo install -d -o root -g root -m 755 "/etc/skel/${EULA_STATE_DIR}"
     sudo install -o root -g root -m 644 "$eula_file" \
         "/etc/skel/${EULA_STATE_DIR}/eula-"
 
-    # Obtener UID_MIN de login.defs; usar 1000 si no está definido.
     uid_min="$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null || true)"
     [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
 
-    # Preparar cada cuenta normal existente que tenga un directorio home real.
     while IFS=: read -r username _ uid gid _ home shell; do
         [[ "$uid" =~ ^[0-9]+$ ]] || continue
         (( uid >= uid_min )) || continue
