@@ -27,7 +27,7 @@ El instalador automatiza la preparación del sistema, la activación temporal de
 Abre una terminal y ejecuta los siguientes comandos:
 
 ```bash
-curl -o setup.sh https://raw.githubusercontent.com/pauchiner/packet-tracer/refs/heads/main/setup.sh
+curl -o setup.sh https://raw.githubusercontent.com/pauchiner/inelcom/refs/heads/main/packet-tracer.sh
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -81,7 +81,7 @@ ClusterSSH abrirá una terminal para cada equipo y una consola de control desde 
 Una vez conectadas las sesiones, introduce los siguientes comandos en la consola de control de ClusterSSH:
 
 ```bash
-curl -o setup.sh https://raw.githubusercontent.com/pauchiner/packet-tracer/refs/heads/main/setup.sh
+curl -o setup.sh https://raw.githubusercontent.com/pauchiner/inelcom/refs/heads/main/packet-tracer.sh
 chmod +x setup.sh
 ./setup.sh
 ```
