@@ -105,48 +105,33 @@ configure_chrome() {
     sudo cp -p -- "$DESKTOP_FILE" "$BACKUP_FILE" ||
         die "No se ha podido crear la copia de seguridad."
 
-    sudo cat -- "$DESKTOP_FILE" > "$TEMP_FILE" ||
-        die "No se ha podido leer el archivo original."
+    sudo cat -- "$DESKTOP_FILE" |
+        sed 's/\r$//' |
+        awk -v parameter="$PARAMETER" '
+            /^[[:space:]]*Exec[[:space:]]*=/ {
+                count++
 
-    local exec_count=0
-    local changed_count=0
-
-    # Añade el parámetro al final de cada Exec=,
-    # sin duplicarlo si ya está presente.
-    awk -v parameter="$PARAMETER" \
-        -v counts_file="${TEMP_FILE}.counts" '
-        BEGIN {
-            exec_count = 0
-            changed_count = 0
-        }
-
-        /^[[:space:]]*Exec=/ {
-            exec_count++
-
-            if ($0 !~ ("(^|[[:space:]])" parameter "([[:space:]]|$)")) {
-                sub(/[[:space:]]*$/, "")
-                $0 = $0 " " parameter
-                changed_count++
+                if ($0 !~ ("(^|[[:space:]])" parameter "([[:space:]]|$)")) {
+                    sub(/[[:space:]]*$/, "")
+                    $0 = $0 " " parameter
+                    changed++
+                }
             }
-        }
 
-        {
-            print
-        }
+            { print }
 
-        END {
-            print exec_count, changed_count > counts_file
-            close(counts_file)
-        }
-    ' "$DESKTOP_FILE" > "${TEMP_FILE}.new" ||
-        die "No se ha podido procesar el archivo .desktop."
+            END {
+                if (count == 0) {
+                    exit 10
+                }
 
-    read -r exec_count changed_count < "${TEMP_FILE}.counts"
-    rm -f -- "${TEMP_FILE}.counts" "$TEMP_FILE"
-    TEMP_FILE="${TEMP_FILE}.new"
+                printf "%d %d\n", count, changed > "/dev/stderr"
+            }
+        ' > "$TEMP_FILE" 2>"${TEMP_FILE}.info" ||
+        die "No se han encontrado líneas Exec= o ha fallado el procesamiento."
 
-    (( exec_count > 0 )) ||
-        die "No se ha encontrado ninguna línea Exec=."
+    read -r exec_count changed_count < "${TEMP_FILE}.info"
+    rm -f -- "${TEMP_FILE}.info"
 
     if (( changed_count == 0 )); then
         log_info "Todas las líneas Exec ya contienen el parámetro."
@@ -155,16 +140,12 @@ configure_chrome() {
         return
     fi
 
-    # Mantiene propietario y permisos del archivo original.
-    sudo install -o root -g root -m 644 \
-        "$TEMP_FILE" "${DESKTOP_FILE}.new" ||
+    sudo install -o root -g root \
+        --reference="$DESKTOP_FILE" "$TEMP_FILE" "${DESKTOP_FILE}.new" ||
         die "No se ha podido preparar el archivo modificado."
 
-    sudo chown --reference="$DESKTOP_FILE" "${DESKTOP_FILE}.new"
-    sudo chmod --reference="$DESKTOP_FILE" "${DESKTOP_FILE}.new"
-
     sudo mv -f -- "${DESKTOP_FILE}.new" "$DESKTOP_FILE" ||
-        die "No se ha podido actualizar el archivo de Chrome."
+        die "No se ha podido actualizar Chrome."
 
     rm -f -- "$TEMP_FILE"
     TEMP_FILE=""
