@@ -10,8 +10,8 @@ umask 022
 
 readonly VERSION="9.0.0"
 readonly APP_NAME="Cisco Packet Tracer"
-readonly DOWNLOAD_URL="https://github.com/pauchiner/packet-tracer/releases/download/${VERSION}/CiscoPacketTracer.deb"
-readonly ICON_URL="https://raw.githubusercontent.com/pauchiner/cisco-packet-tracer-script-test/refs/heads/main/pkt.png"
+readonly DOWNLOAD_URL="https://github.com/pauchiner/inelcom/releases/download/${VERSION}/CiscoPacketTracer.deb"
+readonly ICON_URL="https://raw.githubusercontent.com/pauchiner/inelcom/refs/heads/main/sources/pkt.png"
 
 readonly DOWNLOAD_DIR="${HOME}/packettracer-install"
 readonly DEB_FILE="${DOWNLOAD_DIR}/CiscoPacketTracer.deb"
