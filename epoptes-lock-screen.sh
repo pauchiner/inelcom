@@ -115,12 +115,6 @@ update_users() {
 
         username="$(basename "$home_dir")"
 
-        if [[ "$username" == "guest-user" || "$username" == "estudiant" || "$username" == "estudiant" ]]; then
-            log_warning "Skipping excluded account: $username"
-            ((SKIPPED++))
-            continue
-        fi
-
         uid="$(stat -c '%u' "$home_dir")"
         gid="$(stat -c '%g' "$home_dir")"
 
