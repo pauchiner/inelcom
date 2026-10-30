@@ -4,11 +4,6 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 022
 
-# ==================================================
-# KDE Plasma - Configuración de KWin
-# ==================================================
-
-readonly APP_NAME="Configuración de KWin"
 readonly SOURCE="/etc/skel/.config/kwinrc"
 readonly CONFIG_SECTION="ModifierOnlyShortcuts"
 readonly CONFIG_ENTRY="Meta="
@@ -16,10 +11,6 @@ readonly CONFIG_ENTRY="Meta="
 UPDATED=0
 SKIPPED=0
 FAILED=0
-
-# ==================================================
-# Colores y mensajes
-# ==================================================
 
 if [[ -t 1 ]]; then
     readonly GREEN='\033[0;32m'
@@ -42,10 +33,6 @@ log_error()   { printf '%b[ERROR]%b %s\n' "$RED" "$RESET" "$*" >&2; }
 log_step() {
     printf '\n%b==> %s%b\n' "$BLUE" "$*" "$RESET"
 }
-
-# ==================================================
-# Configuración de /etc/skel
-# ==================================================
 
 configure_skel() {
     log_step "1/3 - Configurando /etc/skel"
@@ -114,10 +101,6 @@ configure_skel() {
     log_info "Parámetro: $CONFIG_ENTRY"
 }
 
-# ==================================================
-# Aplicar configuración a los usuarios existentes
-# ==================================================
-
 update_users() {
     log_step "2/3 - Actualizando usuarios existentes"
 
@@ -161,12 +144,9 @@ update_users() {
         count=$((count + 1))
     done
 
+
     (( count > 0 )) || log_warning "No se han encontrado directorios de usuarios en /home."
 }
-
-# ==================================================
-# Resumen final
-# ==================================================
 
 show_summary() {
     log_step "3/3 - Resumen de la configuración"
@@ -182,11 +162,8 @@ show_summary() {
     printf '  Errores:      %b%s%b\n' "$RED" "$FAILED" "$RESET"
 
     printf '\n'
-    printf '  Origen:      %s\n' "$SOURCE"
-    printf '  Configuración: [%s] %s\n' "$CONFIG_SECTION" "$CONFIG_ENTRY"
-
-    printf '\n'
     printf '  %bConfiguración de KWin aplicada correctamente.%b\n' "$TEAL" "$RESET"
+    printf '  %bReinicia el equipo para mostrar los cambios!%b\n' "$RED" "$RESET"
     printf '\n'
 
 
@@ -196,10 +173,6 @@ show_summary() {
     printf '  %bInelcom 2026%b\n' "$TEAL" "$RESET"
     printf '\n'
 }
-
-# ==================================================
-# Ejecución principal
-# ==================================================
 
 main() {
     printf '\n'
