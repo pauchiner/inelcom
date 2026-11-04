@@ -265,7 +265,8 @@ enable_jammy_repositories() {
     log_step "2/8 - Activando temporalmente los repositorios Ubuntu Jammy"
 
     if sudo test -e "$JAMMY_FILE"; then
-        die "Ya existe $JAMMY_FILE. Revisa su contenido antes de continuar."
+        log_warning "Los repositorios Ubuntu Jammy ya están activados. Se omite este paso."
+        return 0
     fi
 
     cat > "$JAMMY_TMP" <<'EOF'
