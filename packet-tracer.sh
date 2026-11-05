@@ -351,10 +351,18 @@ download_package() {
 install_package() {
     log_step "4/8 - Instalando Packet Tracer"
 
+    # Fix temporal de dependencias
+    log_task "Instalando dependencias adicionales" sudo apt install libpcre2-dev ||
+        die "No se han podido instalar las dependencias adicionales"
+
+
     if ! log_task "Instalando el paquete DEB" sudo dpkg -i "$DEB_FILE"; then
         log_warning "dpkg ha detectado un error. Intentando resolver dependencias..."
 
         log_task "Resolviendo dependencias" sudo apt-get --fix-broken install -y -qq ||
+            die "No se han podido resolver las dependencias."
+
+        log_task "Resolviendo dependencias" sudo apt install -f -qq ||
             die "No se han podido resolver las dependencias."
 
         log_task "Reintentando la instalación de Packet Tracer" sudo dpkg -i "$DEB_FILE" ||
